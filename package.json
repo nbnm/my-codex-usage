@@ -1,0 +1,44 @@
+{
+  "name": "my-codex-usage",
+  "version": "0.2.0",
+  "description": "Interactive terminal dashboard for local Codex usage and rate limits",
+  "type": "module",
+  "bin": {
+    "my-codex-usage": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "PRD.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "os": [
+    "darwin"
+  ],
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "build": "npm run clean && tsc -p tsconfig.build.json && chmod 755 dist/cli.js",
+    "dev": "tsx src/cli.tsx",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "ink": "^7.1.1",
+    "react": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "@types/react": "^19.2.0",
+    "ink-testing-library": "^4.0.0",
+    "tsx": "^4.23.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  },
+  "packageManager": "npm@11.6.2",
+  "license": "MIT",
+  "private": true
+}

@@ -160,7 +160,9 @@ Never, except for the exact current-day metadata exception below:
 - persist or log login IDs, authorization URLs, device codes, or login
   notification error text;
 - log or persist email addresses, account identifiers, prompts, responses,
-  repository paths, file names, source content, thread IDs, or turn IDs;
+  repository paths, file names, source content, thread IDs, or turn IDs; the
+  only path-derived value allowed to leave the current-day reader is the safe
+  final project-folder label required by `TODAY-011`;
 - install, update, move, or modify the user's Codex CLI; or
 - add telemetry, a backend, or another outbound integration.
 
@@ -184,16 +186,26 @@ The sole session-event exception is `TODAY-001`–`TODAY-005`. It must:
 - inspect only regular `.jsonl` files under the initialized Codex session and
   archived-session roots, never follow symbolic links, and include older
   sessions only when their file was updated during the current UTC day;
-- read only top-level timestamps, `turn_context` model/effort, and
+- read only top-level timestamps, `turn_context` model/effort/`cwd`, and
   `event_msg.token_count.info.last_token_usage` numeric counters;
-- discard all other fields immediately and never return, log, render, or
-  persist identifiers, paths, prompts, responses, reasoning text, commands,
-  tool content, or raw records;
+- reduce `cwd` immediately to a display-safe final folder name and, only when
+  contained beneath `<codexHome>/worktrees`, a bounded
+  `worktrees/<relative-components>` display path; discard the absolute path and
+  never return, log, render, or persist any other identifier, path, prompt,
+  response, reasoning text, command, tool content, or raw record;
 - use fatal UTF-8 decoding, a 4 MiB per-line limit, safe non-negative integers,
   cancellation, and bounded display-safe skip counts; and
 - remain read-only, current-day-only, non-persistent, local-only, partial, and
   mathematically isolated from service usage, joined Activity, limits,
   summaries, and history.
+
+Project-folder attribution must follow `TODAY-011`: require an absolute macOS
+path, use only its final non-control component, reject unsafe or overlong
+labels, and fall back to `unknown`. Worktree attribution must follow
+`TODAY-012`: normalize both roots, prove containment beneath the managed
+worktree root, reject traversal/control components, return only a
+Codex-home-relative path, and include it in the aggregation key. Never expose
+an absolute path or a non-worktree parent. Never persist or log either value.
 
 Credit estimates for current-day rows must follow `TODAY-009`–`TODAY-010`:
 
@@ -206,6 +218,11 @@ Credit estimates for current-day rows must follow `TODAY-009`–`TODAY-010`:
   as a subtotal for priced groups when unpriced groups exist; and
 - keep all estimates in memory and label them partial base-rate estimates, not
   invoices or authoritative service accounting.
+
+Current-day presentation must follow `TODAY-013`: render only Input, Cached,
+Output, Reason, and Credits. Keep cache-write, counted, protocol-total, and
+unattributed values out of TUI/plain output and warnings. Cached is an Input
+subset and Reasoning is an Output subset. Never price omitted counters.
 
 ## Domain and Persistence Rules
 
@@ -337,9 +354,10 @@ Credit estimates for current-day rows must follow `TODAY-009`–`TODAY-010`:
   but must identify sampling as disabled.
 - The default/`--today` current snapshot is a dedicated console, not another
   dashboard panel. It must show
-  current-UTC-day local rows grouped by model and effort with input, cached
-  input, cache-write input, output, reasoning output, protocol total, and
-  display-safe base credit estimates. `--dashboard` selects the historical
+  current-UTC-day local rows grouped by sanitized project folder, optional
+  Codex-home-relative worktree path, model, and effort with input, cached
+  input, output, reasoning output, and display-safe base credit
+  estimates. `--dashboard` selects the historical
   interface. The current snapshot
   refreshes every ten seconds, uses `r`/`?`/`q`/Escape, preserves the latest
   valid scan, and uses the same alternate-screen and no-color guarantees.

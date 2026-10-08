@@ -94,8 +94,8 @@ the MVP. This is an unsupported authentication state, not a zero-usage state.
   values when delayed authoritative buckets arrive, and label the joined
   result as non-authoritative whenever local coverage contributes.
 - Provide a dedicated current-day console that groups local Codex token events
-  by model and reasoning effort and reports input, cached input, cache-write
-  input, output, reasoning output, protocol total, and an embedded-rate-card
+  by sanitized project-folder name, model, and reasoning effort and reports
+  input, cached input, output, reasoning output, and an embedded-rate-card
   credit estimate without exposing session content. This console is the
   default view for an argument-free invocation.
 - Start quickly, remain responsive during refresh, and restore the terminal
@@ -263,16 +263,19 @@ metadata reader rather than fabricating a model split from account totals.
 
 | ID | Requirement |
 | --- | --- |
-| `TODAY-001` | `--today` must show only token events whose top-level timestamp falls in the current UTC day, grouped by exact model and reasoning-effort strings. Missing metadata must be grouped as `unknown`, never guessed from configuration defaults. |
-| `TODAY-002` | Each group and the grand total must show input tokens, cached-input tokens, cache-write input tokens when supplied, output tokens, reasoning-output tokens, and protocol total tokens. The application must sum each protocol field independently across events and display the reported total field directly rather than recomputing it by adding the other columns. |
+| `TODAY-001` | `--today` must show only token events whose top-level timestamp falls in the current UTC day, grouped by sanitized project-folder label, optional Codex-home-relative worktree path, exact model, and reasoning-effort strings. Missing metadata must be grouped as `unknown`, never guessed from configuration defaults. |
+| `TODAY-002` | Each group and the grand total must show only input tokens, cached-input tokens, output tokens, and reasoning-output tokens. Cache-write, counted, protocol-total, and unattributed values must not appear in interactive or plain output. The reader may retain validated raw counters internally for aggregation and compatibility checks. |
 | `TODAY-003` | The reader may inspect only regular `.jsonl` session files under the initialized `codexHome` session and archived-session roots whose modification time can contain current-day events. It must not follow symbolic links. A session created before today but updated today must remain eligible. |
-| `TODAY-004` | For each eligible file, the reader may consume only the top-level timestamp, `turn_context` model/effort metadata, and `event_msg` `token_count` `last_token_usage` counters. It must immediately discard all other fields and must never select, render, log, return, or persist thread/turn/item IDs, paths, titles, prompts, responses, reasoning text, commands, tool data, or source content. |
+| `TODAY-004` | For each eligible file, the reader may consume only the top-level timestamp, `turn_context` model/effort/`cwd` metadata, and `event_msg` `token_count` `last_token_usage` counters. It must immediately reduce `cwd` to the display-safe final folder name required by `TODAY-011` and, only for a contained Codex-managed worktree, the relative path required by `TODAY-012`; it must then discard the absolute path and all other fields. Except for that bounded relative worktree display value, it must never render, log, return, or persist an absolute path, parent folder, thread/turn/item ID, title, prompt, response, reasoning text, command, tool data, or source content. |
 | `TODAY-005` | Rollout input is untrusted. The reader must use fatal UTF-8 decoding, a 4 MiB per-line bound, safe-integer non-negative counters, cancellation, non-symlink traversal, deterministic aggregation, and display-safe skipped-file/line counts. Malformed unrelated records may be skipped without fabricating usage. |
 | `TODAY-006` | Current-day detailed usage is a local, partial observation. It excludes cloud-only, ephemeral, deleted, unavailable, and not-yet-flushed sessions and must never be reconciled with or substituted into service daily usage, joined Activity, limits, lifetime totals, persisted history, or account statistics. |
 | `TODAY-007` | Interactive current-day mode must use the alternate screen, refresh on launch, every ten seconds, and on `r`, keep the last valid table visible during refresh, and exit cleanly on `q`, Escape, Ctrl+C, SIGINT, or SIGTERM. Plain mode must scan once, print an ANSI-free table, and exit. |
-| `TODAY-008` | The view must show the UTC date, last scan time, partial-local warning, grouped rows sorted by total descending then model/effort, a grand total, scanned-file/token-event/skipped-record counts, and an explicit empty or unavailable state. Meaning must remain complete with color disabled. |
+| `TODAY-008` | The view must show the UTC date, last scan time, partial-local warning, project and worktree-path details, grouped rows sorted by internally aggregated protocol total descending then project/worktree/model/effort, a grand total of the displayed token fields, scanned-file/token-event/skipped-record counts, and an explicit empty or unavailable state. Meaning must remain complete with color disabled. |
 | `TODAY-009` | The current-day view must estimate base credits per model using the embedded rate card: GPT-5.6 Sol 125/12.5/750, Daybreak Blue 125/12.5/750, Daybreak Red 312.5/31.25/1875, GPT-5.6 Terra 50/5/300, GPT-5.6 Luna 5/0.5/30, GPT-5.5 125/12.5/750, GPT-5.4 62.5/6.25/375, GPT-5.4 mini 18.75/1.875/113, GPT-Image-2 image 200/50/750, and GPT-Image-2 text 125/31.25/250 credits per million uncached-input/cached-input/output tokens. GPT-5.3-Codex-Spark is research preview with no numeric rate. Model matching must use explicit sanitized aliases; unknown models must remain unpriced. |
 | `TODAY-010` | Credit calculation must use `max(inputTokens - cachedInputTokens, 0)` at the input rate, cached input at the cached-input rate, and protocol output at the output rate. Cache-write input and reasoning-output are already represented by those priced protocol categories and must never be added again. Each priced row must show its estimate; a grand subtotal may sum only priced rows and must disclose any unpriced groups. Estimates must be labeled partial base-rate estimates that may exclude fast-mode, tool, enterprise-legacy, or other service adjustments and must never be represented as an invoice or persisted. |
+| `TODAY-011` | Current-day attribution may derive one `projectFolder` label from `turn_context.cwd`. The reader must require an absolute macOS path, remove trailing separators, keep only the final folder component, reject terminal-control/bidirectional-control characters and overlong labels, and use `unknown` when no safe label exists. It must never expose or retain the original path or a parent component. Rows without a `worktreePath` that share the same final folder label intentionally merge; managed-worktree rows follow `TODAY-012`. The label is current-day local context rather than service-authoritative project accounting. |
+| `TODAY-012` | When a normalized `turn_context.cwd` is strictly contained beneath normalized `<codexHome>/worktrees`, current-day attribution may additionally return `worktrees/<relative-components>` as `worktreePath`. The path must stay relative to `codexHome`, contain no empty, dot, traversal, terminal-control, or bidirectional-control component, and remain within a bounded display length. Non-worktree, root-level, invalid, or escaping paths must return no worktree path. The relative path may be used only for current-day grouping and display; it must never be persisted, logged, expanded to an absolute path, or interpreted to extract an identifier. Different relative worktree paths must remain distinct even when their project basenames match. |
+| `TODAY-013` | Cached input must be labeled as a subset of Input and reasoning output as a subset of Output. Cache-write, counted, protocol-total, and unattributed values are internal-only and must not be rendered, warned about, or included in credit estimates. Their omission must not change raw parsing, row ordering, credit calculations, or privacy behavior. |
 
 ### 6.6 Persistence and privacy
 
@@ -410,7 +413,8 @@ history directly.
   unavailable; service data continues without a primary warning.
 - Current-day detail files are unavailable or malformed: preserve the last
   valid table in interactive mode and show bounded skipped-record counts or a
-  display-safe unavailable state; never print raw file data or paths.
+  display-safe unavailable state; never print raw file data or paths beyond the
+  validated Codex-home-relative worktree value allowed by `TODAY-012`.
 - Another live dashboard owns the lease: do not start app-server; exit `1` with
   guidance to quit the older instance and verify the installed version.
 - Corrupt persisted data: quarantine with a timestamped `.corrupt` suffix,
@@ -422,9 +426,13 @@ history directly.
 
 - Local read-only integration only. The optional dashboard query uses the fixed
   aggregate columns `tokens_used` and `updated_at` and never enumerates rows.
-- The default/`--today` exception reads only the token and model/effort metadata listed
+- The default/`--today` exception reads only the token, model/effort, and
+  working-directory metadata listed
   in `TODAY-001`–`TODAY-005` from eligible current-day local session events.
-  Raw records and all content-bearing fields are ignored and never leave the
+  The working directory is reduced immediately to its safe final folder name
+  and, only when contained beneath the managed worktree root, a bounded
+  Codex-home-relative worktree path. Absolute paths, unrelated parent paths,
+  raw records, and all content-bearing fields are ignored and never leave the
   reader.
 - No authentication-file access, direct credential handling, telemetry, or network
   listener.
@@ -504,10 +512,9 @@ The MVP is accepted when:
     appears in the plain-output audit when the same date has no service bucket;
     a later service bucket deterministically replaces it, and joined statistics
     match exactly the plotted values.
-16. Current-day fixtures prove per-model/per-effort input, cache, output,
-    reasoning, and total aggregation; cross-midnight exclusion; malformed and
-    oversized-record handling; direct protocol-total aggregation without
-    cross-column arithmetic;
+16. Current-day fixtures prove per-model/per-effort input, cache, output, and
+    reasoning aggregation; cross-midnight exclusion; malformed and
+    oversized-record handling; direct internal protocol-total aggregation;
     no prohibited fields in returned state or output; ANSI-free plain output;
     ten-second refresh; and alternate-screen restoration.
 17. An argument-free invocation opens the current-day snapshot; `--dashboard`
@@ -515,6 +522,19 @@ The MVP is accepted when:
     prove exact rate matching, uncached-input subtraction, no cache/reasoning
     double count, rated-only subtotals, research-preview handling, and an
     explicit unpriced result for unknown models.
+18. Current-day project fixtures prove folder/model/effort grouping, per-folder
+    credit attribution, context changes within one session, safe Unicode folder
+    labels, `unknown` fallback, duplicate-basename merging for non-worktree
+    rows, and absence of absolute or unrelated parent paths from domain state,
+    TUI/plain output, and persistence.
+19. Worktree fixtures prove contained paths are rendered relative to
+    `codexHome`, distinct worktrees with the same project basename stay
+    separate, local checkout rows use no worktree path, traversal/control input
+    is rejected, and neither the absolute Codex home nor a worktree path enters
+    persistence or diagnostics.
+20. Accounting fixtures prove cache-write, counted, protocol-total, and
+    unattributed values stay absent from TUI/plain output and never change row
+    or subtotal credit estimates.
 
 ## 14. Deferred Scope
 
@@ -522,5 +542,6 @@ Linux and Windows support, standalone binaries, Homebrew, registry publishing,
 background monitoring, notifications, exports, custom refresh intervals,
 predictions, and additional account types are deferred. This section records
 scope boundaries only and is not a release plan. Historical detailed token
-breakdowns, per-thread or per-request attribution, and persistence of detailed
-token events are also deferred.
+breakdowns, per-thread or per-request attribution, absolute-path display,
+parent-path disambiguation, and persistence of detailed token events are also
+deferred.

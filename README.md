@@ -3,9 +3,9 @@
 `my-codex-usage` is a local terminal dashboard for current-day Codex tokens,
 base credit estimates, account limits, reset times, service-reported activity,
 and privacy-bounded local observations. An argument-free launch opens the live
-current-day model/effort snapshot; `--dashboard` opens historical usage. It runs
-on macOS, communicates with the installed `codex app-server`, and does not
-require a separate backend.
+current-day project/worktree/model/effort snapshot; `--dashboard` opens
+historical usage. It runs on macOS, communicates with the installed
+`codex app-server`, and does not require a separate backend.
 
 The dashboard joins two Activity sources into one coverage-aware series:
 
@@ -32,9 +32,59 @@ not an authoritative service-accounted total.
 - Five-minute service refreshes and one-minute current-limit/local refreshes.
 - Sanitized local history with no telemetry, backend, or credential parsing.
 - Automatic alternate-screen restoration when the interactive dashboard exits.
-- A default current-day local breakdown by model and reasoning effort with
-  input, cached input, cache-write input, output, reasoning output, protocol
-  total, and embedded-rate-card credit estimates.
+- A default current-day local breakdown by project folder, managed-worktree
+  path, model, and reasoning effort with input, cached input, output, reasoning
+  output, and embedded-rate-card credit estimates.
+
+## Purpose and architecture
+
+The tool answers two related questions without sending usage data to another
+service:
+
+1. **What is Codex using today?** The default current-day console reads only
+   bounded token metadata from local Codex session events and attributes it to
+   a sanitized project folder, optional managed-worktree path, model, and
+   effort.
+2. **How are my account limits and recent activity changing?** The historical
+   dashboard reads the account, rate-limit, and usage methods exposed by the
+   local Codex app-server and combines delayed service buckets with clearly
+   labeled partial local observations.
+
+The executable has two isolated runtime paths:
+
+```text
+my-codex-usage (src/cli.tsx)
+├── default / --today
+│   ├── discover Codex and initialize app-server to locate Codex home
+│   ├── close app-server
+│   ├── scan current-UTC-day token metadata read-only
+│   ├── aggregate by project/worktree/model/effort in memory
+│   └── render with Ink or deterministic plain text
+└── --dashboard
+    ├── acquire the single-writer lease and load sanitized history
+    ├── keep one JSONL app-server client alive
+    ├── refresh account, rate limits, and service usage
+    ├── sample the fixed read-only SQLite aggregate when enabled
+    ├── normalize, join, and persist bounded domain history
+    └── render with Ink or deterministic plain text
+```
+
+The layers deliberately keep protocol data, calculations, persistence, and UI
+separate:
+
+| Layer | Source | Responsibility |
+| --- | --- | --- |
+| CLI and lifecycle | `src/cli.tsx`, `src/cli/` | Parse options, choose today/dashboard and interactive/plain modes, own signals, alternate-screen lifecycle, and the dashboard lease. |
+| Codex integration | `src/codex/` | Discover and validate Codex, own the child process and JSON-RPC transport, parse untrusted DTOs, and perform the two narrowly bounded local reads. |
+| Domain | `src/domain/` | Normalize limits and usage, calculate joined periods and statistics, aggregate current-day rows, and estimate credits. |
+| Refresh and persistence | `src/refresh/`, `src/persistence/` | Serialize refresh scopes, preserve usable cached state, migrate and atomically write sanitized history, and enforce retention. |
+| Presentation | `src/tui/`, `src/plain/` | Render domain state only; these layers never spawn Codex or write storage. |
+
+Service buckets, local dashboard observations, and current-day session metadata
+remain distinct source types. The joined historical chart selects one value per
+day by documented coverage rules; it never adds overlapping sources. The
+current-day table is non-persistent and never feeds account totals, charts, or
+history. See [PRD.md](PRD.md) for the exact security and accounting contracts.
 
 ## Requirements
 
@@ -180,7 +230,7 @@ Then repeat the packed global installation steps.
    my-codex-usage
    ```
 
-3. Review token and estimated-credit totals grouped by exact model and effort.
+3. Review token and estimated-credit totals grouped by project folder, exact model, and effort.
    The snapshot refreshes every ten seconds.
 4. Press `q` or Escape to exit. The previous terminal screen and scrollback are
    restored.
@@ -301,12 +351,13 @@ service/local provenance audits. `--today` cannot be combined with `--range`,
 `--group`, or `--no-local` because those options describe the historical
 dashboard.
 
-### Current-day model and effort breakdown
+### Current-day project, worktree, model, and effort breakdown
 
-Codex's account usage endpoint exposes aggregate daily buckets, not a model or
-reasoning-effort split. The dedicated mode reads the per-response token-count
-metadata that Codex writes to local session event files and groups it by the
-active model and effort for that event.
+Codex's account usage endpoint exposes aggregate daily buckets, not a project,
+model, or reasoning-effort split. The dedicated mode reads the per-response
+token-count metadata and active working-directory context that Codex writes to
+local session event files. It groups each event by sanitized project-folder
+name, active model, and effort.
 
 The token field names match Codex's documented JSONL turn-completion usage and
 app-server token-usage structures; see the official
@@ -315,18 +366,29 @@ and [app-server reference](https://learn.chatgpt.com/docs/app-server).
 
 Columns are:
 
+- **Project** — only the final folder name from the turn's working directory;
+- **Worktree** — `worktrees/<relative-components>` for a Codex-managed
+  worktree, relative to Codex home; local checkout rows show `—`;
+- **Model** — the exact model string recorded for the turn;
+- **Effort** — the exact reasoning-effort string recorded for the turn;
 - **Input** — protocol input tokens;
-- **Cached input** — Codex's cached-input token counter;
-- **Cache write** — cache-write input tokens when Codex supplies them;
+- **Cached input** — Codex's cached-input token counter, a subset of Input;
 - **Output** — protocol output tokens;
-- **Reasoning output** — Codex's reasoning-output token counter; and
-- **Total** — Codex's protocol total, not a sum of every displayed column.
+- **Reasoning output** — Codex's reasoning-output token counter, a subset of
+  Output;
 - **Credits** — a partial base-rate estimate for the exact matched model.
 
-The console sums each protocol field independently and displays Codex's
-reported total directly. It does not invent a total by adding the detail
-columns. Rows are grouped by the exact model and effort strings; missing
-metadata appears as `unknown`.
+Write, Counted, Protocol, and Unattributed are intentionally omitted from both
+interactive and plain output. They are not needed for the base credit estimate.
+Rows are grouped by project-folder label, optional managed-worktree path, exact
+model, and effort strings; missing or unsafe metadata appears as
+`unknown`. Only the final folder component is kept for a normal checkout: for
+example, `/Volumes/Work/example-app` becomes `example-app`. If the directory is
+beneath Codex home's managed `worktrees` folder, the Worktree column
+additionally shows a relative value such as
+`worktrees/<worktree>/<project>`. This keeps two worktrees with the same project
+basename separate without displaying the absolute Codex home or user home.
+Detailed rows and worktree paths are never persisted.
 
 Credits are estimated with:
 
@@ -367,7 +429,7 @@ This mode is deliberately bounded:
 - cloud-only, ephemeral, deleted, unavailable, and not-yet-flushed activity is
   not visible;
 - the reader ignores all prompts, responses, reasoning text, commands, IDs,
-  titles, repository data, and tool content;
+  titles, repository content, parent/absolute paths, and tool content;
 - detailed rows are never persisted or merged with the dashboard history; and
 - the result is a partial local observation, not an account invoice or an
   authoritative daily service total.
@@ -503,17 +565,21 @@ The dashboard does not read or persist:
 - Codex authentication files or credentials;
 - emails or account identifiers;
 - thread, turn, or item identifiers;
-- titles, prompts, responses, previews, paths, or source content;
+- titles, prompts, responses, previews, absolute paths, unrelated parent paths,
+  or source content;
 - raw app-server stdout, stderr, or protocol traffic; or
 - telemetry or backend data.
 
 Use `--no-local` if local aggregate sampling is not desired.
 
 The default/explicit `--today` exception reads only timestamps,
-model/effort metadata,
-and numeric token counters from eligible current-day local session events. It
-does not follow symbolic links, and it never returns, logs, renders, or persists
-the ignored content-bearing fields or raw records.
+model/effort/working-directory metadata, and numeric token counters from
+eligible current-day local session events. It keeps a display-safe final
+project-folder name and, for a contained Codex-managed worktree only, a bounded
+path relative to Codex home. It does not follow symbolic links and never
+returns, logs, renders, or persists the absolute path, unrelated parent
+folders, ignored content-bearing fields, or raw records. The relative worktree
+path is current-day display metadata only and is never persisted.
 
 ## Updating
 
@@ -706,7 +772,22 @@ npm run build
 When packaging is affected, validate a tarball in a temporary npm prefix rather
 than overwriting the user's global installation.
 
-## Architecture and requirements
+Contributor workflow:
+
+1. Read [PRD.md](PRD.md), [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md), and
+   [AGENTS.md](AGENTS.md), then identify the requirement IDs affected by the
+   change.
+2. Keep process/protocol work in `src/codex`, calculations in `src/domain`,
+   history writes in `src/persistence`, coordination in `src/refresh`, and
+   rendering in `src/tui` or `src/plain`.
+3. Update the PRD and implementation plan in the same change when behavior or
+   architecture changes.
+4. Add focused unit, integration, or render coverage and run the three
+   validation commands above.
+5. If packaging changes, create the tarball in a temporary directory and smoke
+   test it with a temporary npm prefix. Do not publish it to npm.
+
+## Project documentation
 
 - [PRD.md](PRD.md) is the authoritative product and engineering specification.
 - [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) records the acceptance-gated
@@ -715,5 +796,5 @@ than overwriting the user's global installation.
   and completion requirements.
 
 Setup and operation correspond to `CLI-001`–`CLI-011`, `AUTH-002`–`AUTH-007`,
-`LOCAL-001`–`LOCAL-007`, `TODAY-001`–`TODAY-008`, and
+`LOCAL-001`–`LOCAL-007`, `TODAY-001`–`TODAY-013`, and
 `TUI-031`–`TUI-036` in the PRD.

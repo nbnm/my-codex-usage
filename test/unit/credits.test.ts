@@ -115,8 +115,23 @@ describe('current-day credit estimates', () => {
       unpricedGroupCount: 2
     });
   });
+
+  it('does not price protocol-only unattributed tokens', () => {
+    const baseline = estimateCredits('gpt-5.6-sol', tokens);
+    const protocolOnly = estimateCredits('gpt-5.6-sol', {
+      ...tokens,
+      totalTokens: tokens.totalTokens + 250_000
+    });
+    expect(protocolOnly).toEqual(baseline);
+  });
 });
 
 function group(model: string): TodayUsageGroup {
-  return {...tokens, model, effort: 'high', eventCount: 1};
+  return {
+    ...tokens,
+    projectFolder: 'fixture-project',
+    model,
+    effort: 'high',
+    eventCount: 1
+  };
 }

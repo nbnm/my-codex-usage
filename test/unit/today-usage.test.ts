@@ -4,16 +4,19 @@ import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {
   aggregateTodayUsageRecords,
-  SessionTodayUsageSource
+  projectFolderFromCwd,
+  SessionTodayUsageSource,
+  worktreePathFromCwd
 } from '../../src/codex/today-usage.js';
 
 const DAY = '2026-08-17';
+const CODEX_HOME = '/Users/example/.codex';
 
 describe('current-day token aggregation', () => {
-  it('groups current UTC-day events by model and effort and preserves protocol totals', () => {
+  it('groups current UTC-day events by project, model, and effort and preserves protocol totals', () => {
     const result = aggregateTodayUsageRecords(
       [
-        context('gpt-5.6-sol', 'high'),
+        context('gpt-5.6-sol', 'high', '/Volumes/Work/project-alpha'),
         usage(`${DAY}T01:00:00.000Z`, {
           input_tokens: 100,
           cached_input_tokens: 80,
@@ -30,7 +33,7 @@ describe('current-day token aggregation', () => {
           reasoning_output_tokens: 2,
           total_tokens: 45
         }),
-        context('gpt-5.6-terra', 'medium'),
+        context('gpt-5.6-terra', 'medium', '/Volumes/Work/project-beta'),
         usage(`${DAY}T03:00:00.000Z`, {
           input_tokens: 10,
           cached_input_tokens: 0,
@@ -46,12 +49,14 @@ describe('current-day token aggregation', () => {
           total_tokens: 1_000
         })
       ],
-      DAY
+      DAY,
+      CODEX_HOME
     );
 
     expect(result.tokenEventCount).toBe(3);
     expect(result.groups).toHaveLength(2);
     expect(result.groups[0]).toMatchObject({
+      projectFolder: 'project-alpha',
       model: 'gpt-5.6-sol',
       effort: 'high',
       inputTokens: 140,
@@ -78,6 +83,126 @@ describe('current-day token aggregation', () => {
     );
   });
 
+  it('attributes usage by safe folder label and follows turn-context changes', () => {
+    const result = aggregateTodayUsageRecords(
+      [
+        context('gpt-5.6-sol', 'high', '/Users/example/SECRET_PARENT/shared'),
+        usage(`${DAY}T01:00:00.000Z`, tokenCounts(10)),
+        context('gpt-5.6-sol', 'high', '/Volumes/Work/shared/'),
+        usage(`${DAY}T02:00:00.000Z`, tokenCounts(20)),
+        context('gpt-5.6-sol', 'high', '/Volumes/Work/other-project'),
+        usage(`${DAY}T03:00:00.000Z`, tokenCounts(5)),
+        context('gpt-5.6-sol', 'high', 'relative/unsafe'),
+        usage(`${DAY}T04:00:00.000Z`, tokenCounts(3))
+      ],
+      DAY,
+      CODEX_HOME
+    );
+
+    expect(result.groups).toHaveLength(3);
+    expect(result.groups.find(group => group.projectFolder === 'shared')).toMatchObject({
+      inputTokens: 30,
+      eventCount: 2
+    });
+    expect(result.groups.find(group => group.projectFolder === 'other-project')).toMatchObject({
+      inputTokens: 5,
+      eventCount: 1
+    });
+    expect(result.groups.find(group => group.projectFolder === 'unknown')).toMatchObject({
+      inputTokens: 3,
+      eventCount: 1
+    });
+    expect(JSON.stringify(result)).not.toContain('SECRET_PARENT');
+    expect(JSON.stringify(result)).not.toContain('/Volumes/Work');
+  });
+
+  it('sanitizes project folders without exposing parent paths', () => {
+    expect(projectFolderFromCwd('/Volumes/Work/my-codex-usage/')).toBe(
+      'my-codex-usage'
+    );
+    expect(projectFolderFromCwd('/Volumes/Work/cafe\u0301')).toBe('café');
+    expect(projectFolderFromCwd('relative/project')).toBe('unknown');
+    expect(projectFolderFromCwd('/')).toBe('unknown');
+    expect(projectFolderFromCwd('/Volumes/Work/bad\u001b[31m')).toBe('unknown');
+    expect(projectFolderFromCwd(`/Volumes/Work/${'x'.repeat(129)}`)).toBe(
+      'unknown'
+    );
+    expect(projectFolderFromCwd('/Volumes/Work/bad\u202eproject')).toBe(
+      'unknown'
+    );
+  });
+
+  it('keeps distinct managed worktrees with one project basename separate', () => {
+    const result = aggregateTodayUsageRecords(
+      [
+        context(
+          'gpt-5.6-sol',
+          'high',
+          '/Users/example/.codex/worktrees/worktree-a/shared'
+        ),
+        usage(`${DAY}T01:00:00.000Z`, tokenCounts(10)),
+        context(
+          'gpt-5.6-sol',
+          'high',
+          '/Users/example/.codex/worktrees/worktree-b/shared/'
+        ),
+        usage(`${DAY}T02:00:00.000Z`, tokenCounts(20)),
+        context('gpt-5.6-sol', 'high', '/Volumes/Work/shared'),
+        usage(`${DAY}T03:00:00.000Z`, tokenCounts(5))
+      ],
+      DAY,
+      CODEX_HOME
+    );
+
+    expect(result.groups).toHaveLength(3);
+    expect(result.groups.map(group => group.worktreePath)).toEqual([
+      'worktrees/worktree-b/shared',
+      'worktrees/worktree-a/shared',
+      undefined
+    ]);
+    expect(JSON.stringify(result)).not.toContain('/Users/example');
+    expect(JSON.stringify(result)).not.toContain('/Volumes/Work');
+  });
+
+  it('accepts only safe paths contained by the managed worktree root', () => {
+    expect(
+      worktreePathFromCwd(
+        '/Users/example/.codex/worktrees/worktree-a/project/',
+        CODEX_HOME
+      )
+    ).toBe('worktrees/worktree-a/project');
+    expect(
+      worktreePathFromCwd('/Volumes/Work/project', CODEX_HOME)
+    ).toBeUndefined();
+    expect(
+      worktreePathFromCwd('/Users/example/.codex/worktrees', CODEX_HOME)
+    ).toBeUndefined();
+    expect(
+      worktreePathFromCwd(
+        '/Users/example/.codex/worktrees/../outside/project',
+        CODEX_HOME
+      )
+    ).toBeUndefined();
+    expect(
+      worktreePathFromCwd(
+        '/Users/example/.codex/worktrees/worktree-a/bad\u001b[31m',
+        CODEX_HOME
+      )
+    ).toBeUndefined();
+    expect(
+      worktreePathFromCwd(
+        `/Users/example/.codex/worktrees/worktree-a/${'x'.repeat(129)}`,
+        CODEX_HOME
+      )
+    ).toBeUndefined();
+    expect(
+      worktreePathFromCwd(
+        '/Users/example/.codex/worktrees/worktree-a/bad\u202eproject',
+        CODEX_HOME
+      )
+    ).toBeUndefined();
+  });
+
   it('uses unknown labels and rejects invalid counters without guessing', () => {
     const result = aggregateTodayUsageRecords(
       [
@@ -89,7 +214,8 @@ describe('current-day token aggregation', () => {
         }),
         {type: 'event_msg', payload: {type: 'unrelated'}}
       ],
-      DAY
+      DAY,
+      CODEX_HOME
     );
 
     expect(result.groups[0]).toMatchObject({
@@ -106,6 +232,7 @@ describe('SessionTodayUsageSource', () => {
   it('reads eligible older sessions, filters by event day, and never returns ignored content', async () => {
     const codexHome = await mkdtemp(join(tmpdir(), 'today-usage-'));
     const sessions = join(codexHome, 'sessions', '2026', '08', '16');
+    const worktreeCwd = join(codexHome, 'worktrees', 'fixture-tree', 'project-alpha');
     await mkdir(sessions, {recursive: true});
     const file = join(sessions, 'fixture.jsonl');
     const records = [
@@ -113,6 +240,7 @@ describe('SessionTodayUsageSource', () => {
         timestamp: '2026-08-16T20:00:00.000Z',
         type: 'turn_context',
         payload: {
+          cwd: worktreeCwd,
           model: 'gpt-5.6-sol',
           effort: 'xhigh',
           ignored_marker: 'CONTENT_MUST_NOT_ESCAPE'
@@ -145,6 +273,8 @@ describe('SessionTodayUsageSource', () => {
     expect(snapshot.tokenEventCount).toBe(2);
     expect(snapshot.skippedRecordCount).toBe(3);
     expect(snapshot.groups[0]).toMatchObject({
+      projectFolder: 'project-alpha',
+      worktreePath: 'worktrees/fixture-tree/project-alpha',
       model: 'gpt-5.6-sol',
       effort: 'xhigh',
       inputTokens: 24,
@@ -152,6 +282,8 @@ describe('SessionTodayUsageSource', () => {
     });
     expect(JSON.stringify(snapshot)).not.toContain('CONTENT_MUST_NOT_ESCAPE');
     expect(JSON.stringify(snapshot)).not.toContain('fixture.jsonl');
+    expect(JSON.stringify(snapshot)).not.toContain('SECRET_PARENT');
+    expect(JSON.stringify(snapshot)).not.toContain(codexHome);
   });
 
   it('returns an unavailable state for unreadable roots and honors cancellation', async () => {
@@ -173,11 +305,15 @@ describe('SessionTodayUsageSource', () => {
   });
 });
 
-function context(model: string, effort: string): unknown {
+function context(
+  model: string,
+  effort: string,
+  cwd = '/Volumes/Work/fixture-project'
+): unknown {
   return {
     timestamp: `${DAY}T00:00:00.000Z`,
     type: 'turn_context',
-    payload: {model, effort}
+    payload: {cwd, model, effort}
   };
 }
 

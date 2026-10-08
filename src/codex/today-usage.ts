@@ -1,6 +1,6 @@
 import {createReadStream} from 'node:fs';
 import {lstat, readdir} from 'node:fs/promises';
-import {join} from 'node:path';
+import {basename, isAbsolute, join, relative, resolve, sep} from 'node:path';
 import type {
   TodayUsageGroup,
   TodayUsageSnapshot,
@@ -24,6 +24,8 @@ type CandidateScan = {
 type GroupAccumulator = TodayUsageGroup;
 
 type RecordContext = {
+  projectFolder: string;
+  worktreePath?: string;
   model: string;
   effort: string;
 };
@@ -84,6 +86,7 @@ export class SessionTodayUsageSource implements TodayUsageSource {
         const result = await scanRolloutFile(
           file,
           dayKey,
+          codexHome,
           groups,
           this.maximumLineBytes,
           signal
@@ -102,6 +105,8 @@ export class SessionTodayUsageSource implements TodayUsageSource {
     const orderedGroups = [...groups.values()].sort(
       (left, right) =>
         compareDescending(left.totalTokens, right.totalTokens) ||
+        left.projectFolder.localeCompare(right.projectFolder) ||
+        (left.worktreePath ?? '').localeCompare(right.worktreePath ?? '') ||
         left.model.localeCompare(right.model) ||
         left.effort.localeCompare(right.effort)
     );
@@ -135,13 +140,15 @@ export class SessionTodayUsageSource implements TodayUsageSource {
 
 export function aggregateTodayUsageRecords(
   records: readonly unknown[],
-  dayKey: string
+  dayKey: string,
+  codexHome: string
 ): Pick<
   TodayUsageSnapshot,
   'groups' | 'total' | 'tokenEventCount' | 'skippedRecordCount'
 > {
   const groups = new Map<string, GroupAccumulator>();
   let context: RecordContext = {
+    projectFolder: UNKNOWN_LABEL,
     model: UNKNOWN_LABEL,
     effort: UNKNOWN_LABEL
   };
@@ -149,7 +156,7 @@ export function aggregateTodayUsageRecords(
   let skippedRecordCount = 0;
 
   for (const record of records) {
-    const result = parseAllowedRecord(record, dayKey);
+    const result = parseAllowedRecord(record, dayKey, codexHome);
     if (result.kind === 'context') {
       context = result.context;
     } else if (result.kind === 'usage') {
@@ -166,6 +173,8 @@ export function aggregateTodayUsageRecords(
   const orderedGroups = [...groups.values()].sort(
     (left, right) =>
       compareDescending(left.totalTokens, right.totalTokens) ||
+      left.projectFolder.localeCompare(right.projectFolder) ||
+      (left.worktreePath ?? '').localeCompare(right.worktreePath ?? '') ||
       left.model.localeCompare(right.model) ||
       left.effort.localeCompare(right.effort)
   );
@@ -257,6 +266,7 @@ async function findCandidateFiles(
 async function scanRolloutFile(
   file: string,
   dayKey: string,
+  codexHome: string,
   groups: Map<string, GroupAccumulator>,
   maximumLineBytes: number,
   signal?: AbortSignal
@@ -265,6 +275,7 @@ async function scanRolloutFile(
   let pending = Buffer.alloc(0);
   let discardingOversizedLine = false;
   let context: RecordContext = {
+    projectFolder: UNKNOWN_LABEL,
     model: UNKNOWN_LABEL,
     effort: UNKNOWN_LABEL
   };
@@ -319,7 +330,7 @@ async function scanRolloutFile(
           skippedRecordCount++;
           continue;
         }
-        const processed = processLine(line, dayKey, context, groups);
+        const processed = processLine(line, dayKey, codexHome, context, groups);
         context = processed.context;
         tokenEventCount += processed.tokenEventCount;
         skippedRecordCount += processed.skippedRecordCount;
@@ -327,7 +338,7 @@ async function scanRolloutFile(
     }
 
     if (!discardingOversizedLine && pending.length > 0) {
-      const processed = processLine(pending, dayKey, context, groups);
+      const processed = processLine(pending, dayKey, codexHome, context, groups);
       tokenEventCount += processed.tokenEventCount;
       skippedRecordCount += processed.skippedRecordCount;
     }
@@ -342,6 +353,7 @@ async function scanRolloutFile(
 function processLine(
   line: Buffer,
   dayKey: string,
+  codexHome: string,
   context: RecordContext,
   groups: Map<string, GroupAccumulator>
 ): {context: RecordContext; tokenEventCount: number; skippedRecordCount: number} {
@@ -353,7 +365,7 @@ function processLine(
     return {context, tokenEventCount: 0, skippedRecordCount: 1};
   }
 
-  const result = parseAllowedRecord(record, dayKey);
+  const result = parseAllowedRecord(record, dayKey, codexHome);
   if (result.kind === 'context') {
     return {context: result.context, tokenEventCount: 0, skippedRecordCount: 0};
   }
@@ -369,7 +381,11 @@ function processLine(
   };
 }
 
-function parseAllowedRecord(record: unknown, dayKey: string): RecordResult {
+function parseAllowedRecord(
+  record: unknown,
+  dayKey: string,
+  codexHome: string
+): RecordResult {
   if (!isObject(record)) {
     return {kind: 'ignore'};
   }
@@ -378,9 +394,12 @@ function parseAllowedRecord(record: unknown, dayKey: string): RecordResult {
     return {kind: 'ignore'};
   }
   if (record.type === 'turn_context') {
+    const worktreePath = worktreePathFromCwd(payload.cwd, codexHome);
     return {
       kind: 'context',
       context: {
+        projectFolder: projectFolderFromCwd(payload.cwd),
+        ...(worktreePath === undefined ? {} : {worktreePath}),
         model: parseSafeLabel(payload.model),
         effort: parseSafeLabel(payload.effort)
       }
@@ -437,8 +456,12 @@ function addUsageGroup(
   context: RecordContext,
   counts: TokenBreakdown
 ): boolean {
-  const key = `${context.model}\u0000${context.effort}`;
+  const key = `${context.projectFolder}\u0000${context.worktreePath ?? ''}\u0000${context.model}\u0000${context.effort}`;
   const current = groups.get(key) ?? {
+    projectFolder: context.projectFolder,
+    ...(context.worktreePath === undefined
+      ? {}
+      : {worktreePath: context.worktreePath}),
     model: context.model,
     effort: context.effort,
     eventCount: 0,
@@ -449,6 +472,10 @@ function addUsageGroup(
     return false;
   }
   groups.set(key, {
+    projectFolder: current.projectFolder,
+    ...(current.worktreePath === undefined
+      ? {}
+      : {worktreePath: current.worktreePath}),
     model: current.model,
     effort: current.effort,
     eventCount: current.eventCount + 1,
@@ -518,6 +545,97 @@ function parseSafeLabel(value: unknown): string {
     /^[\x20-\x7e]+$/u.test(value)
     ? value
     : UNKNOWN_LABEL;
+}
+
+export function projectFolderFromCwd(value: unknown): string {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > 4_096 ||
+    !isAbsolute(value)
+  ) {
+    return UNKNOWN_LABEL;
+  }
+  const folder = basename(value).normalize('NFC');
+  if (
+    folder.length === 0 ||
+    folder.length > 128 ||
+    folder === '.' ||
+    folder === '..' ||
+    /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(folder)
+  ) {
+    return UNKNOWN_LABEL;
+  }
+  return folder;
+}
+
+export function worktreePathFromCwd(
+  value: unknown,
+  codexHome: string
+): string | undefined {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > 4_096 ||
+    !isAbsolute(value) ||
+    codexHome.length === 0 ||
+    codexHome.length > 4_096 ||
+    !isAbsolute(codexHome) ||
+    hasUnsafePathCharacters(value) ||
+    hasUnsafePathCharacters(codexHome)
+  ) {
+    return undefined;
+  }
+
+  const trimmedCwd = value.replace(/\/+$/u, '');
+  const rawComponents = trimmedCwd.slice(1).split(sep);
+  if (
+    trimmedCwd.length === 0 ||
+    rawComponents.some(
+      component =>
+        component.length === 0 ||
+        component === '.' ||
+        component === '..'
+    )
+  ) {
+    return undefined;
+  }
+
+  const worktreeRoot = resolve(codexHome, 'worktrees');
+  const normalizedCwd = resolve(trimmedCwd);
+  const containedPath = relative(worktreeRoot, normalizedCwd);
+  if (
+    containedPath.length === 0 ||
+    containedPath === '..' ||
+    containedPath.startsWith(`..${sep}`) ||
+    isAbsolute(containedPath)
+  ) {
+    return undefined;
+  }
+
+  const components = containedPath.split(sep).map(component =>
+    component.normalize('NFC')
+  );
+  if (
+    components.some(
+      component =>
+        component.length === 0 ||
+        component.length > 128 ||
+        component === '.' ||
+        component === '..' ||
+        hasUnsafePathCharacters(component)
+    )
+  ) {
+    return undefined;
+  }
+  const displayPath = ['worktrees', ...components].join('/');
+  return displayPath.length <= 512 ? displayPath : undefined;
+}
+
+function hasUnsafePathCharacters(value: string): boolean {
+  return /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(
+    value
+  );
 }
 
 function isTimestampInDay(value: unknown, dayKey: string): boolean {

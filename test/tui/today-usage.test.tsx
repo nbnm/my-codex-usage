@@ -12,6 +12,8 @@ const snapshot: TodayUsageSnapshot = {
   sampledAt: '2026-08-17T14:00:00.000Z',
   groups: [
     {
+      projectFolder: 'my-codex-usage',
+      worktreePath: 'worktrees/fixture-worktree/my-codex-usage',
       model: 'gpt-5.6-sol',
       effort: 'xhigh',
       eventCount: 3,
@@ -20,7 +22,7 @@ const snapshot: TodayUsageSnapshot = {
       cacheWriteInputTokens: 123,
       outputTokens: 678,
       reasoningOutputTokens: 456,
-      totalTokens: 13_023
+      totalTokens: 13_073
     }
   ],
   total: {
@@ -29,7 +31,7 @@ const snapshot: TodayUsageSnapshot = {
     cacheWriteInputTokens: 123,
     outputTokens: 678,
     reasoningOutputTokens: 456,
-    totalTokens: 13_023
+    totalTokens: 13_073
   },
   scannedFileCount: 2,
   tokenEventCount: 3,
@@ -65,14 +67,17 @@ describe('TodayUsageApp', () => {
     );
     await settle();
     const frame = app.lastFrame() ?? '';
-    expect(frame).toContain('today by model and effort');
-    expect(frame).toContain('gpt-5.6-sol · xhigh');
+    expect(frame).toContain('today by project/worktree, model, and effort');
+    expect(frame).toContain('my-codex-usage · gpt-5.6-sol · xhigh');
+    expect(frame).toContain('Worktree worktrees/fixture-worktree/my-codex-usage');
     expect(frame).toContain('Input 12,345');
     expect(frame).toContain('Cached 10,000');
-    expect(frame).toContain('Write 123');
     expect(frame).toContain('Output 678');
     expect(frame).toContain('Reasoning 456');
-    expect(frame).toContain('Total 13,023');
+    expect(frame).not.toMatch(/\bWrite\b/u);
+    expect(frame).not.toContain('Counted');
+    expect(frame).not.toContain('Protocol');
+    expect(frame).not.toContain('Unattrib');
     expect(frame).toContain('Credits ~0.9266');
     expect(frame).toContain('Estimated base credits ~0.9266');
     expect(frame).toContain('not service-accounted');
@@ -88,13 +93,20 @@ describe('TodayUsageApp', () => {
         codexVersion="0.146.1"
         color={false}
         refreshIntervalMs={10}
-        terminalSize={{columns: 150, rows: 30}}
+        terminalSize={{columns: 240, rows: 30}}
       />
     );
     await settle(2);
     expect(app.lastFrame()).toContain('Cached');
     expect(app.lastFrame()).toContain('Reason');
+    expect(app.lastFrame()).not.toMatch(/\bWrite\b/u);
+    expect(app.lastFrame()).not.toContain('Counted');
+    expect(app.lastFrame()).not.toContain('Protocol');
+    expect(app.lastFrame()).not.toContain('Unattrib');
     expect(app.lastFrame()).toContain('Credits');
+    expect(app.lastFrame()).toContain('Project');
+    expect(app.lastFrame()).toContain('Worktree');
+    expect(app.lastFrame()).toContain('worktrees/fixture-worktree/my-cod');
 
     app.stdin.write('r');
     await settle(2);
@@ -104,6 +116,13 @@ describe('TodayUsageApp', () => {
     await settle();
     expect(app.lastFrame()).toContain('current-day keys');
     expect(app.lastFrame()).toContain('current UTC day');
+    expect(app.lastFrame()).toContain('managed-worktree path');
+    expect(app.lastFrame()).toContain('relative to Codex home');
+    expect(app.lastFrame()).toContain('Absolute and unrelated parent paths');
+    expect(app.lastFrame()).not.toMatch(/\bWrite\b/u);
+    expect(app.lastFrame()).not.toContain('Counted');
+    expect(app.lastFrame()).not.toContain('Protocol');
+    expect(app.lastFrame()).not.toContain('Unattrib');
 
     app.stdin.write('?');
     await settle(15);

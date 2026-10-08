@@ -126,13 +126,13 @@ export function TodayUsageApp({
     return <TodayHelp color={color} />;
   }
 
-  const narrow = size.columns < 140;
+  const narrow = size.columns < 180;
   const compact = size.columns < 60 || size.rows < 14;
   return (
     <Box flexDirection="column" paddingX={1} width={size.columns}>
       <Box justifyContent="space-between">
         <Text bold {...colorProps(color, 'cyan')}>
-          My Codex Usage · today by model and effort
+          My Codex Usage · today by project/worktree, model, and effort
         </Text>
         <Text {...colorProps(color, refreshing ? 'yellow' : 'green')}>
           {refreshing ? 'Refreshing…' : snapshot?.status === 'unavailable' ? 'Unavailable' : 'Live'}
@@ -142,7 +142,7 @@ export function TodayUsageApp({
         {snapshot?.dayKey ?? utcDay()} UTC · Codex {codexVersion ?? 'unknown'} · local partial observation
       </Text>
       <Text dimColor>
-        Protocol totals reported by Codex · credits estimated from embedded base token rates
+        Project = final folder · Worktree = Codex-home-relative path · embedded base rates
       </Text>
 
       {warning !== undefined && (
@@ -150,7 +150,6 @@ export function TodayUsageApp({
           <Text {...colorProps(color, 'yellow')}>{warning}</Text>
         </Box>
       )}
-
       <Box
         flexDirection="column"
         marginTop={1}
@@ -200,10 +199,9 @@ function WideTable({
   color: boolean;
   width: number;
 }): React.JSX.Element {
-  const modelWidth = Math.max(
-    18,
-    Math.min(30, Math.floor(width * 0.23))
-  );
+  const projectWidth = Math.max(14, Math.min(24, Math.floor(width * 0.14)));
+  const worktreeWidth = Math.max(26, Math.min(42, Math.floor(width * 0.2)));
+  const modelWidth = Math.max(18, Math.min(26, Math.floor(width * 0.14)));
   const effortWidth = 9;
   const numberWidth = 13;
   const creditWidth = 13;
@@ -211,15 +209,22 @@ function WideTable({
   return (
     <Box flexDirection="column">
       <Text bold>
-        {'Model'.padEnd(modelWidth)} {'Effort'.padEnd(effortWidth)}{' '}
+        {'Project'.padEnd(projectWidth)} {'Worktree'.padEnd(worktreeWidth)}{' '}
+        {'Model'.padEnd(modelWidth)}{' '}
+        {'Effort'.padEnd(effortWidth)}{' '}
         {'Input'.padStart(numberWidth)} {'Cached'.padStart(numberWidth)}{' '}
-        {'Write'.padStart(numberWidth)} {'Output'.padStart(numberWidth)}{' '}
-        {'Reason'.padStart(numberWidth)} {'Total'.padStart(numberWidth)}{' '}
+        {'Output'.padStart(numberWidth)} {'Reason'.padStart(numberWidth)}{' '}
         {'Credits'.padStart(creditWidth)}
       </Text>
       {snapshot.groups.map(group => {
         const estimate = estimateCredits(group.model, group);
-        return <Text key={`${group.model}\u0000${group.effort}`} wrap="truncate">
+        return <Text key={`${group.projectFolder}\u0000${group.worktreePath ?? ''}\u0000${group.model}\u0000${group.effort}`} wrap="truncate">
+          <Text bold {...colorProps(color, 'cyan')}>
+            {truncate(group.projectFolder, projectWidth).padEnd(projectWidth)}
+          </Text>{' '}
+          <Text dimColor>
+            {truncate(group.worktreePath ?? '—', worktreeWidth).padEnd(worktreeWidth)}
+          </Text>{' '}
           <Text {...colorProps(color, 'blue')}>
             {truncate(group.model, modelWidth).padEnd(modelWidth)}
           </Text>{' '}
@@ -230,15 +235,11 @@ function WideTable({
           <Text {...colorProps(color, 'yellow')}>
             {format(group.cachedInputTokens).padStart(numberWidth)}
           </Text>{' '}
-          {format(group.cacheWriteInputTokens).padStart(numberWidth)}{' '}
           <Text {...colorProps(color, 'green')}>
             {format(group.outputTokens).padStart(numberWidth)}
           </Text>{' '}
           <Text {...colorProps(color, 'magenta')}>
             {format(group.reasoningOutputTokens).padStart(numberWidth)}
-          </Text>{' '}
-          <Text bold {...colorProps(color, 'cyan')}>
-            {format(group.totalTokens).padStart(numberWidth)}
           </Text>{' '}
           <Text {...colorProps(color, estimate.status === 'estimated' ? 'green' : 'yellow')}>
             {formatCreditEstimate(estimate).padStart(creditWidth)}
@@ -262,27 +263,29 @@ function NarrowRows({
     <Box flexDirection="column">
       {snapshot.groups.map((group, index) => (
         <Box
-          key={`${group.model}\u0000${group.effort}`}
+          key={`${group.projectFolder}\u0000${group.worktreePath ?? ''}\u0000${group.model}\u0000${group.effort}`}
           flexDirection="column"
           marginTop={index === 0 || compact ? 0 : 1}
         >
           <Text>
-            <Text bold {...colorProps(color, 'blue')}>{group.model}</Text>
+            <Text bold {...colorProps(color, 'cyan')}>{group.projectFolder}</Text>
+            {' · '}
+            <Text {...colorProps(color, 'blue')}>{group.model}</Text>
             {' · '}
             <Text {...colorProps(color, 'magenta')}>{group.effort}</Text>
             {' · '}{group.eventCount} {group.eventCount === 1 ? 'event' : 'events'}
           </Text>
+          {group.worktreePath !== undefined && (
+            <Text dimColor>Worktree {group.worktreePath} · relative to Codex home</Text>
+          )}
           <Text>
             Input {formatExact(group.inputTokens)} ·{' '}
             <Text {...colorProps(color, 'yellow')}>Cached {formatExact(group.cachedInputTokens)}</Text>
-            {' · '}Write {formatExact(group.cacheWriteInputTokens)}
           </Text>
           <Text>
             <Text {...colorProps(color, 'green')}>Output {formatExact(group.outputTokens)}</Text>
             {' · '}
             <Text {...colorProps(color, 'magenta')}>Reasoning {formatExact(group.reasoningOutputTokens)}</Text>
-            {' · '}
-            <Text bold {...colorProps(color, 'cyan')}>Total {formatExact(group.totalTokens)}</Text>
           </Text>
           <Text {...colorProps(color, estimateCredits(group.model, group).status === 'estimated' ? 'green' : 'yellow')}>
             Credits {formatCreditEstimate(estimateCredits(group.model, group))} · base-rate estimate
@@ -304,8 +307,10 @@ function TodayHelp({color}: {color: boolean}): React.JSX.Element {
       <Text>q / Escape Quit and restore the terminal</Text>
       <Box marginTop={1} flexDirection="column">
         <Text dimColor>Scope: current UTC day, local session events only.</Text>
-        <Text dimColor>Rows group exact model and reasoning-effort metadata.</Text>
-        <Text dimColor>Protocol fields are aggregated independently; total is shown as reported.</Text>
+        <Text dimColor>Rows group project, managed-worktree path, exact model, and reasoning effort.</Text>
+        <Text dimColor>Worktree paths are relative to Codex home; local checkouts show no path.</Text>
+        <Text dimColor>Absolute and unrelated parent paths are never displayed or persisted.</Text>
+        <Text dimColor>Cached is an Input subset; Reasoning is an Output subset.</Text>
         <Text dimColor>Credits = uncached input + cached input + output at the matched per-million rates.</Text>
         <Text dimColor>Cache-write and reasoning counters are not charged a second time.</Text>
         <Text dimColor>Rates (input/cached/output):</Text>
@@ -321,7 +326,7 @@ function TodayHelp({color}: {color: boolean}): React.JSX.Element {
 }
 
 function formatBreakdown(value: TokenBreakdown): string {
-  return `Input ${formatExact(value.inputTokens)} · Cached ${formatExact(value.cachedInputTokens)} · Write ${formatExact(value.cacheWriteInputTokens)} · Output ${formatExact(value.outputTokens)} · Reasoning ${formatExact(value.reasoningOutputTokens)} · Total ${formatExact(value.totalTokens)}`;
+  return `Input ${formatExact(value.inputTokens)} · Cached ${formatExact(value.cachedInputTokens)} · Output ${formatExact(value.outputTokens)} · Reasoning ${formatExact(value.reasoningOutputTokens)}`;
 }
 
 function CreditSummary({

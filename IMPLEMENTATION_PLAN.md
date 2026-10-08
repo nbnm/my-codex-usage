@@ -1,6 +1,6 @@
 # My Codex Usage — Current Implementation Plan
 
-- **Status:** Current-day model/effort token console implemented and validated
+- **Status:** Current-day project/worktree/model/effort console implemented and validated
 - **Command and package:** `my-codex-usage`
 - **Runtime:** macOS 14+, Node.js 22+
 - **Protocol baseline:** `codex-cli 0.144.3`
@@ -201,7 +201,7 @@ Requirements: `USAGE-009`–`USAGE-010`, `LOCAL-005`, `LOCAL-007`,
 
 - [x] Specify `--today`, current-UTC-day scope, typed token columns, local-only
   caveats, lease isolation, and the narrow session-event privacy exception.
-- [x] Add a defensive, streaming reader that tracks only model/effort context
+- [x] Add a defensive, streaming reader that tracks only project/model/effort context
   and sums current-day `last_token_usage` counters from eligible regular local
   session files.
 - [x] Add deterministic domain aggregation and separate interactive/plain
@@ -215,7 +215,7 @@ Requirements: `USAGE-009`–`USAGE-010`, `LOCAL-005`, `LOCAL-007`,
   smoke tests, and alternate-screen restoration without publishing.
 
 Gate: `my-codex-usage --today` shows a live current-UTC-day table grouped by
-model and effort; `--today --plain` is ANSI-free; all privacy, temporal,
+project, model, and effort; `--today --plain` is ANSI-free; all privacy, temporal,
 malformed-input, and terminal-lifecycle tests pass.
 
 Requirements: `CLI-011`, `TODAY-001`–`TODAY-008`, `TUI-001`, `TUI-008`,
@@ -223,7 +223,7 @@ Requirements: `CLI-011`, `TODAY-001`–`TODAY-008`, `TUI-001`, `TUI-008`,
 
 ### Phase J — Default current snapshot and credit estimates
 
-- [x] Make the current-UTC-day model/effort snapshot the argument-free default;
+- [x] Make the current-UTC-day project/model/effort snapshot the argument-free default;
   retain `--today` as an explicit alias and add `--dashboard` for the historical
   interface while preserving dashboard inference for range/group/local flags.
 - [x] Add a typed, immutable credit rate card with explicit model aliases and a
@@ -241,6 +241,59 @@ rate, unpriced models remain visibly unpriced, and no token category is billed
 twice.
 
 Requirements: `CLI-003`, `CLI-011`, `TODAY-001`–`TODAY-010`.
+
+### Phase K — Current-day project-folder attribution
+
+- [x] Expand the allowed `turn_context` metadata to `cwd`, immediately derive
+  only a display-safe final folder label, and discard the absolute path.
+- [x] Group current-day rows by project-folder label, model, and effort so each
+  row carries its own token counters and base credit estimate.
+- [x] Add the Project column/label to adaptive Ink, plain output, totals,
+  legends, help, and user documentation without persisting detailed rows.
+- [x] Prove context changes, missing/unsafe paths, Unicode names,
+  duplicate-basename merging, ANSI safety, and absence of absolute or unrelated
+  parent paths in returned or rendered state.
+- [x] Validate typecheck, all tests, build, packed install, alternate-screen
+  restoration, and a sanitized live run without printing full paths.
+
+Gate: the default current-day view identifies the sanitized project folder for
+every token/credit row while no absolute path, parent component, raw record, or
+new persisted field crosses the reader boundary.
+
+Requirements: `TODAY-001`–`TODAY-011`, `TUI-001`, `TUI-008`, `TUI-031`.
+
+### Phase L — Current-day managed-worktree paths
+
+- [x] Derive a bounded `worktrees/<relative-components>` display value only
+  when `turn_context.cwd` is contained beneath `<codexHome>/worktrees`.
+- [x] Include the optional worktree path in aggregation identity, ordering,
+  adaptive Ink rows, plain output, help, and documentation.
+- [x] Keep normal local checkouts path-free and prevent traversal, control
+  characters, absolute Codex-home disclosure, logging, and persistence.
+- [x] Prove distinct worktrees with identical project basenames remain separate
+  and validate the packed default console against live sanitized metadata.
+
+Gate: today mode identifies managed worktrees with a Codex-home-relative path
+while absolute paths and non-worktree parent directories never cross the
+reader boundary.
+
+Requirements: `TODAY-001`–`TODAY-012`, `TUI-001`, `TUI-008`, `TUI-031`.
+
+### Phase M — Reduced current-day columns
+
+- [x] Remove Write, Counted, Protocol, and Unattributed from wide and compact
+  Ink rows, grand totals, warnings, help, and plain output.
+- [x] Retain Input, Cached, Output, Reason, Credits, project/worktree context,
+  raw parsing, row ordering, and credit behavior.
+- [x] Remove presentation-only accounting types/helpers that no longer have a
+  consumer and update user/contributor documentation.
+- [x] Prove the four removed labels/values are absent across wide, compact,
+  plain, no-color, packaged, and live output.
+
+Gate: Today mode presents only Input, Cached, Output, Reason, and Credits while
+the underlying read-only scan and credit estimates remain unchanged.
+
+Requirements: `TODAY-002`, `TODAY-008`–`TODAY-010`, `TODAY-013`.
 
 ## 3. Test Matrix
 
@@ -271,7 +324,7 @@ Requirements: `CLI-003`, `CLI-011`, `TODAY-001`–`TODAY-010`.
 
 ## 4. Fixed Defaults
 
-- Default command: current-UTC-day model/effort snapshot. `--dashboard` opens
+- Default command: current-UTC-day project/worktree/model/effort snapshot. `--dashboard` opens
   the historical interface, whose default range is thirty trailing UTC days
   grouped by day.
 - Full refresh: launch, manual `r`, and every five minutes.
@@ -279,14 +332,15 @@ Requirements: `CLI-003`, `CLI-011`, `TODAY-001`–`TODAY-010`.
 - Local aggregate: enabled unless `--no-local`; it may fill today or a
   missing/pending service date in the derived joined series but is never added
   to a service value for the same day.
-- Current-day detail: default or explicit `--today`, current UTC day only, ten-second
-  interactive refresh, no persistence, no writer lease, and no account calls.
+- Current-day detail: default or explicit `--today`, current UTC day only,
+  sanitized final project-folder labels, ten-second interactive refresh, no
+  persistence, no writer lease, and no account calls.
 - Stale threshold: 90 minutes from the last successful current-limit read.
 - Storage: one user-only atomic `history-v4.json`; legacy `history.json` is
   read-only.
 - Process model: one refresh-capable instance protected by a user-only lease.
 - Runtime dependencies: Ink and React only.
 - No registry publication, backend, telemetry, general thread/turn inspection,
-  content parsing, historical detailed breakdown, configurable dashboard
+  content parsing beyond the `TODAY-004` metadata exception, historical detailed breakdown, configurable dashboard
   intervals, or service/local accounting reconciliation. The sole event-file
   exception is the current-day token metadata reader in `TODAY-001`–`TODAY-005`.

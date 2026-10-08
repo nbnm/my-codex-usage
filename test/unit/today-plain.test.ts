@@ -11,6 +11,8 @@ const snapshot: TodayUsageSnapshot = {
   sampledAt: '2026-08-17T14:00:00.000Z',
   groups: [
     {
+      projectFolder: 'my-codex-usage',
+      worktreePath: 'worktrees/fixture-worktree/my-codex-usage',
       model: 'gpt-5.6-sol',
       effort: 'high',
       eventCount: 2,
@@ -19,7 +21,7 @@ const snapshot: TodayUsageSnapshot = {
       cacheWriteInputTokens: 7,
       outputTokens: 20,
       reasoningOutputTokens: 10,
-      totalTokens: 120
+      totalTokens: 135
     }
   ],
   total: {
@@ -28,7 +30,7 @@ const snapshot: TodayUsageSnapshot = {
     cacheWriteInputTokens: 7,
     outputTokens: 20,
     reasoningOutputTokens: 10,
-    totalTokens: 120
+    totalTokens: 135
   },
   scannedFileCount: 1,
   tokenEventCount: 2,
@@ -38,20 +40,28 @@ const snapshot: TodayUsageSnapshot = {
 };
 
 describe('current-day plain output', () => {
-  it('prints exact grouped counters without ANSI or cross-column total arithmetic', () => {
+  it('prints only the selected grouped counters without ANSI', () => {
     const output = renderTodayPlain(snapshot, '0.146.1');
     expect(output).toContain('current-day token breakdown');
+    expect(output).toContain('Project');
+    expect(output).toContain('Worktree path (Codex-home-relative)');
+    expect(output).toContain('worktrees/fixture-worktree/my-codex-usage');
+    expect(output).toContain('my-codex-usage');
+    expect(output).toContain('relative to Codex home only');
     expect(output).toContain('gpt-5.6-sol');
     expect(output).toContain('Cached input');
-    expect(output).toContain('Cache write');
     expect(output).toContain('Reasoning output');
+    expect(output).not.toMatch(/\bWrite\b/u);
+    expect(output).not.toContain('Counted');
+    expect(output).not.toContain('Protocol');
+    expect(output).not.toContain('Unattrib');
     expect(output).toContain('Est. credits');
     expect(output).toContain('~0.0185');
     expect(output).toContain('Estimated base credits');
-    expect(output).toContain('Cache-write and reasoning counters are not charged again');
-    expect(output).toContain('120');
-    expect(output).toContain('not recomputed from detail columns');
+    expect(output).toContain('Reasoning is not charged again');
     expect(output).not.toMatch(/\u001b\[/u);
+    expect(output).not.toContain('/Volumes/Work');
+    expect(output).not.toContain('/Users/example');
     expect(todayPlainExitCode(snapshot)).toBe(0);
   });
 

@@ -126,6 +126,8 @@ export type CreditEstimateSummary = {
 };
 
 export type TodayUsageGroup = TokenBreakdown & {
+  projectFolder: string;
+  worktreePath?: string;
   model: string;
   effort: string;
   eventCount: number;

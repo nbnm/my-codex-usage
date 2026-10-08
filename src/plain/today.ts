@@ -16,6 +16,7 @@ export function renderTodayPlain(
     `UTC day: ${snapshot.dayKey}`,
     `Codex: ${codexVersion ?? 'unknown'} · scanned ${snapshot.sampledAt}`,
     'Source: local Codex session token events · partial, not service-accounted usage',
+    'Project labels: final folder only · Worktree paths: relative to Codex home only',
     `Coverage: ${snapshot.scannedFileCount} files · ${snapshot.tokenEventCount} token events · ${snapshot.skippedRecordCount} skipped records · ${snapshot.skippedFileCount} skipped files`
   ];
 
@@ -34,10 +35,10 @@ export function renderTodayPlain(
   }
   lines.push(
     '',
-    'Each token field is aggregated independently across local events.',
-    'Protocol total is displayed directly; it is not recomputed from detail columns.',
+    'Each displayed token field is aggregated independently across local events.',
+    'Cached is an Input subset; Reasoning is an Output subset.',
     'Credits are a partial base-rate estimate: (input - cached) + cached + output at the matched model rates.',
-    'Cache-write and reasoning counters are not charged again; service adjustments may differ.',
+    'Reasoning is not charged again; service adjustments may differ.',
     'Cloud-only, ephemeral, deleted, unavailable, and not-yet-flushed activity may be absent.'
   );
   return `${lines.join('\n')}\n`;
@@ -51,14 +52,14 @@ function renderTable(snapshot: TodayUsageSnapshot): string[] {
   const rows = snapshot.groups.map(group => {
     const estimate = estimateCredits(group.model, group);
     return [
+      group.projectFolder,
+      group.worktreePath ?? '—',
       group.model,
       group.effort,
       formatInteger(group.inputTokens),
       formatInteger(group.cachedInputTokens),
-      formatInteger(group.cacheWriteInputTokens),
       formatInteger(group.outputTokens),
       formatInteger(group.reasoningOutputTokens),
-      formatInteger(group.totalTokens),
       estimate.status === 'estimated'
         ? `~${formatCredits(estimate.totalCredits)}`
         : describeUnpricedEstimate(estimate),
@@ -67,28 +68,28 @@ function renderTable(snapshot: TodayUsageSnapshot): string[] {
   });
   const summary = summarizeCreditEstimates(snapshot.groups);
   rows.push([
+    'ALL PROJECTS',
+    '—',
     'TOTAL',
     '—',
     formatInteger(snapshot.total.inputTokens),
     formatInteger(snapshot.total.cachedInputTokens),
-    formatInteger(snapshot.total.cacheWriteInputTokens),
     formatInteger(snapshot.total.outputTokens),
     formatInteger(snapshot.total.reasoningOutputTokens),
-    formatInteger(snapshot.total.totalTokens),
     summary.pricedGroupCount === 0
       ? 'unpriced'
       : `~${formatCredits(summary.estimatedCredits)}${summary.unpricedGroupCount > 0 ? '*' : ''}`,
     formatInteger(snapshot.tokenEventCount)
   ]);
   const headers = [
+    'Project',
+    'Worktree path (Codex-home-relative)',
     'Model',
     'Effort',
     'Input',
     'Cached input',
-    'Cache write',
     'Output',
     'Reasoning output',
-    'Total',
     'Est. credits',
     'Events'
   ];
@@ -98,7 +99,7 @@ function renderTable(snapshot: TodayUsageSnapshot): string[] {
   const formatRow = (row: readonly string[]): string =>
     row
       .map((value, index) =>
-        index < 2
+        index < 4
           ? value.padEnd(widths[index] ?? value.length)
           : value.padStart(widths[index] ?? value.length)
       )
